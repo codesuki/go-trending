@@ -1,0 +1,3 @@
+package: github.com/codesuki/go-trending
+import:
+- package: github.com/codesuki/go-time-series
