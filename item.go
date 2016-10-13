@@ -1,6 +1,7 @@
 package trending
 
 import (
+	"log"
 	"math"
 	"time"
 )
@@ -35,6 +36,10 @@ func (i *item) computeCounts() (float64, float64) {
 	now := time.Now()
 	count, _ := i.timeSeries.Range(now.Add(-i.options.recentDuration), now)
 	totalCount, _ := i.timeSeries.Range(now.Add(-i.options.totalDuration), now)
+	if count == totalCount {
+		log.Println("count and totalCount are the same")
+		return count, totalCount
+	}
 	return count, totalCount - count
 }
 

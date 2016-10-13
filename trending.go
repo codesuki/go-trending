@@ -151,6 +151,8 @@ func (s *Scorer) computeTotals() (float64, float64) {
 	if total == 0 {
 		total = 1
 	}
-	// TODO: this will result in total = 0 if the is only the most recent bin
+	if recentTotal == total {
+		return recentTotal, total
+	}
 	return recentTotal, total - recentTotal
 }
