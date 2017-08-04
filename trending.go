@@ -47,6 +47,12 @@ func WithHalfLife(halfLife time.Duration) Option {
 	}
 }
 
+func WithRecentDuration(recentDuration time.Duration) Option {
+	return func(o *options) {
+		o.recentDuration = recentDuration
+	}
+}
+
 func WithStorageDuration(storageDuration time.Duration) Option {
 	return func(o *options) {
 		o.storageDuration = storageDuration
