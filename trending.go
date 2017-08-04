@@ -22,16 +22,15 @@ import (
 
 var defaultHalfLife = 2 * time.Hour
 var defaultRecentDuration = 1 * time.Minute
-var defaultTotalDuration = 7 * 24 * time.Hour
+var defaultStorageDuration = 7 * 24 * time.Hour
 var defaultMaxResults = 10
 
-// TODO: think of better names
 type options struct {
-	creator        TimeSeriesCreator
-	halfLife       time.Duration
-	recentDuration time.Duration
-	totalDuration  time.Duration
-	maxResults     int
+	creator         TimeSeriesCreator
+	halfLife        time.Duration
+	recentDuration  time.Duration
+	storageDuration time.Duration
+	maxResults      int
 }
 
 type Option func(*options)
@@ -45,6 +44,12 @@ func WithTimeSeries(creator TimeSeriesCreator) Option {
 func WithHalfLife(halfLife time.Duration) Option {
 	return func(o *options) {
 		o.halfLife = halfLife
+	}
+}
+
+func WithStorageDuration(storageDuration time.Duration) Option {
+	return func(o *options) {
+		o.storageDuration = storageDuration
 	}
 }
 
@@ -93,8 +98,8 @@ func NewScorer(options ...Option) Scorer {
 	if scorer.options.recentDuration == 0 {
 		scorer.options.recentDuration = defaultRecentDuration
 	}
-	if scorer.options.totalDuration == 0 {
-		scorer.options.totalDuration = defaultTotalDuration
+	if scorer.options.storageDuration == 0 {
+		scorer.options.storageDuration = defaultStorageDuration
 	}
 	if scorer.options.maxResults == 0 {
 		scorer.options.maxResults = defaultMaxResults
@@ -147,7 +152,7 @@ func (s *Scorer) computeTotals() (float64, float64) {
 	if recentTotal == 0 {
 		recentTotal = 1
 	}
-	total, _ := s.total.Range(now.Add(-s.options.totalDuration), now)
+	total, _ := s.total.Range(now.Add(-s.options.storageDuration), now)
 	if total == 0 {
 		total = 1
 	}

@@ -35,7 +35,7 @@ func (i *item) score(recentTotal float64, total float64) score {
 func (i *item) computeCounts() (float64, float64) {
 	now := time.Now()
 	count, _ := i.timeSeries.Range(now.Add(-i.options.recentDuration), now)
-	totalCount, _ := i.timeSeries.Range(now.Add(-i.options.totalDuration), now)
+	totalCount, _ := i.timeSeries.Range(now.Add(-i.options.storageDuration), now)
 	if count == totalCount {
 		log.Println("count and totalCount are the same")
 		return count, totalCount
