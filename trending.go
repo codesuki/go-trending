@@ -1,6 +1,7 @@
 package trending
 
 import (
+	"log"
 	"sort"
 	"time"
 
@@ -163,6 +164,7 @@ func (s *Scorer) computeTotals() (float64, float64) {
 		total = 1
 	}
 	if recentTotal == total {
+		log.Println("recentTotal and total are the same")
 		return recentTotal, total
 	}
 	return recentTotal, total - recentTotal
