@@ -29,3 +29,12 @@ func (s Scores) take(count int) Scores {
 	}
 	return s[0 : count-1]
 }
+
+func (s Scores) threshold(t float64) Scores {
+	for i := range s {
+		if s[i].Score < t {
+			return s[0:i]
+		}
+	}
+	return s
+}

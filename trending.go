@@ -1,11 +1,11 @@
 package trending
 
 import (
-	"log"
 	"sort"
 	"time"
 
-	"github.com/codesuki/go-time-series"
+	timeseries "github.com/codesuki/go-time-series"
+	"github.com/codesuki/go-trending/slidingwindow"
 )
 
 // Algorithm:
@@ -15,23 +15,33 @@ import (
 // 2. For every play event increase the counter in the current bin
 // 3. Compute the KL Divergence with the following steps
 //    - Compute the probability of the last full bin (this should be the current 5 minutes sliding window)
-//    - Compute the expected probability over the past bins (excluding the last full bin and current bin)
+//    - Compute the expected probability over the past bins including the current bin
 //    - Compute KL Divergence (kld = p * ln(p/e))
 // 4. Keep the highest KL Divergence score together with its timestamp
 // 5. Compute exponential decay multiplier and multiply with highest KL Divergence
 // 6. Blend current KL Divergence score with decayed high score
 
 var defaultHalfLife = 2 * time.Hour
-var defaultRecentDuration = 1 * time.Minute
+var defaultRecentDuration = 5 * time.Minute
 var defaultStorageDuration = 7 * 24 * time.Hour
-var defaultMaxResults = 10
+var defaultMaxResults = 100
+var defaultBaseCount = 3
+var defaultScoreThreshold = 0.01
+var defaultCountThreshold = 3.0
 
 type options struct {
-	creator         TimeSeriesCreator
-	halfLife        time.Duration
+	creator              TimeSeriesCreator
+	slidingWindowCreator SlidingWindowCreator
+
+	halfLife time.Duration
+
 	recentDuration  time.Duration
 	storageDuration time.Duration
-	maxResults      int
+
+	maxResults     int
+	baseCount      int
+	scoreThreshold float64
+	countThreshold float64
 }
 
 type Option func(*options)
@@ -39,6 +49,12 @@ type Option func(*options)
 func WithTimeSeries(creator TimeSeriesCreator) Option {
 	return func(o *options) {
 		o.creator = creator
+	}
+}
+
+func WithSlidingWindow(creator SlidingWindowCreator) Option {
+	return func(o *options) {
+		o.slidingWindowCreator = creator
 	}
 }
 
@@ -66,14 +82,32 @@ func WithMaxResults(maxResults int) Option {
 	}
 }
 
+func WithScoreThreshold(threshold float64) Option {
+	return func(o *options) {
+		o.scoreThreshold = threshold
+	}
+}
+
+func WithCountThreshold(threshold float64) Option {
+	return func(o *options) {
+		o.countThreshold = threshold
+	}
+}
+
 type Scorer struct {
 	options options
 	items   map[string]*item
-	total   TimeSeries
 }
 
+type SlidingWindow interface {
+	Insert(score float64)
+	Max() float64
+}
+
+type SlidingWindowCreator func(string) SlidingWindow
+
 type TimeSeries interface {
-	IncreaseAtTime(amount int, insertTime time.Time)
+	IncreaseAtTime(amount int, time time.Time)
 	Range(start, end time.Time) (float64, error)
 }
 
@@ -83,7 +117,7 @@ func NewMemoryTimeSeries(id string) TimeSeries {
 	ts, _ := timeseries.NewTimeSeries(timeseries.WithGranularities(
 		[]timeseries.Granularity{
 			{Granularity: time.Second, Count: 60},
-			{Granularity: time.Minute, Count: 60},
+			{Granularity: time.Minute, Count: 10},
 			{Granularity: time.Hour, Count: 24},
 			{Granularity: time.Hour * 24, Count: 7},
 		},
@@ -111,61 +145,49 @@ func NewScorer(options ...Option) Scorer {
 	if scorer.options.maxResults == 0 {
 		scorer.options.maxResults = defaultMaxResults
 	}
-	scorer.total = scorer.options.creator("total")
+	if scorer.options.scoreThreshold == 0.0 {
+		scorer.options.scoreThreshold = defaultScoreThreshold
+	}
+	if scorer.options.countThreshold == 0.0 {
+		scorer.options.countThreshold = defaultCountThreshold
+	}
+	if scorer.options.baseCount == 0.0 {
+		scorer.options.baseCount = defaultBaseCount
+	}
+	if scorer.options.slidingWindowCreator == nil {
+		scorer.options.slidingWindowCreator = func(id string) SlidingWindow {
+			return slidingwindow.NewSlidingWindow(
+				slidingwindow.WithStep(time.Hour*24),
+				slidingwindow.WithDuration(scorer.options.storageDuration),
+			)
+		}
+	}
 	return scorer
 }
 
 func (s *Scorer) AddEvent(id string, time time.Time) {
 	item := s.items[id]
 	if item == nil {
-		item = s.createItem(id)
+		item = newItem(id, &s.options)
 		s.items[id] = item
 	}
-	s.addToTotal(time)
 	s.addToItem(item, time)
 }
 
-func (s *Scorer) createItem(id string) *item {
-	return &item{timeSeries: s.options.creator(id), options: &s.options}
-}
-
-func (s *Scorer) addToTotal(time time.Time) {
-	s.total.IncreaseAtTime(1, time)
-}
-
 func (s *Scorer) addToItem(item *item, time time.Time) {
-	item.timeSeries.IncreaseAtTime(1, time)
+	item.eventSeries.IncreaseAtTime(1, time)
 }
 
 func (s *Scorer) Score() Scores {
 	var scores Scores
 	for id, item := range s.items {
-		score := s.scoreOne(item)
+		score := item.score()
 		score.ID = id
 		scores = append(scores, score)
 	}
 	sort.Sort(scores)
+	if s.options.scoreThreshold > 0 {
+		scores = scores.threshold(s.options.scoreThreshold)
+	}
 	return scores.take(s.options.maxResults)
-}
-
-func (s *Scorer) scoreOne(item *item) score {
-	recentTotal, total := s.computeTotals()
-	return item.score(recentTotal, total)
-}
-
-func (s *Scorer) computeTotals() (float64, float64) {
-	now := time.Now()
-	recentTotal, _ := s.total.Range(now.Add(-s.options.recentDuration), now)
-	if recentTotal == 0 {
-		recentTotal = 1
-	}
-	total, _ := s.total.Range(now.Add(-s.options.storageDuration), now)
-	if total == 0 {
-		total = 1
-	}
-	if recentTotal == total {
-		log.Println("recentTotal and total are the same")
-		return recentTotal, total
-	}
-	return recentTotal, total - recentTotal
 }
