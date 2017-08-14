@@ -1,3 +1,5 @@
 package: github.com/codesuki/go-trending
 import:
 - package: github.com/codesuki/go-time-series
+testImport:
+- package: github.com/benbjohnson/clock
